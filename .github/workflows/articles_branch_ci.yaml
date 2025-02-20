@@ -1,83 +1,15 @@
 name: Articles Branch CI
 
 on:
-  push:
-    branches:
-      - "articles/**"
   pull_request:
     branches:
       - "articles/**"
 
 jobs:
-  build-article:
-    runs-on: ubuntu-22.04
-    container:
-      image: ghcr.io/word-coins/latex-build:latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-      AWS_EC2_METADATA_DISABLED: true
-      PDF_BUILD_NOTIFY_URL: ${{ secrets.PDF_BUILD_NOTIFY_URL }}
-      REPO_NAME: ${{ github.repository }}
-      RUN_ID: ${{ github.run_id }}
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
+  call_reusable_workflow:
+    uses: oka4shi/latex-build/.github/workflows/_build_article_branch.yml@main
+    with:
+      repo_name: ${{ github.repository }}
+      branch_name: ${{ github.head_ref }}
+      pr_url:  ${{ github.event.pull_request.html_url }}
 
-      - name: extract branch name
-        shell: bash
-        run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
-        id: extract_branch
-
-      - name: check branch name
-        shell: bash
-        run: |
-          if [[ ${{ steps.extract_branch.outputs.branch }} =~ ^articles/.*$ ]]; then
-          echo "match=true" >> $GITHUB_OUTPUT
-          fi
-        id: branch_regex
-
-      - name: check exist main.md file
-        if: steps.branch_regex.outputs.match == 'true'
-        shell: bash
-        run: |
-          cd ${{ steps.extract_branch.outputs.branch }}
-          if [ -f ./main.md ]; then
-            echo "exist=true" >> $GITHUB_OUTPUT
-          fi
-        id: main_md
-
-      - name: convert markdown to latex
-        if: steps.main_md.outputs.exist == 'true'
-        run: |
-          cd ${{ steps.extract_branch.outputs.branch }}
-          make pandoc
-
-      - name: build articles branch
-        if: steps.branch_regex.outputs.match == 'true'
-        run: |
-          ARTICLE_NAME=$(echo '${{ steps.extract_branch.outputs.branch }}' | awk -F '/' '{print $2}')
-          echo "article_name=$ARTICLE_NAME" >> $GITHUB_OUTPUT
-          cd ${{ steps.extract_branch.outputs.branch }}
-          WORD_FONT=sourcehan-jp make
-        id: build
-
-      - name: upload artifact to github
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.build.outputs.article_name }}.pdf
-          path: ${{ steps.extract_branch.outputs.branch }}/main.pdf
-          retention-days: 3 # 3日くらいあったらみんなダウンロードして確認しているはず
-
-      - name: upload artifact to k8s
-        continue-on-error: true # 失敗しても良い
-        if: steps.branch_regex.outputs.match == 'true'
-        run: |
-          aws s3 --endpoint-url=https://minio.k8s.word-ac.net cp ./main.pdf s3://article-bucket/$REPO_NAME-$ARTICLE_NAME.pdf
-
-      - name: Notify Slack
-        continue-on-error: true # 失敗しても良い
-        if: always()
-        run: ./scripts/notify_slack.sh
-        env:
-          status: ${{ job.status }}
