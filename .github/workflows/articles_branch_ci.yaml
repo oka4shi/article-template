@@ -2,11 +2,10 @@ name: Articles Branch CI
 
 on:
   pull_request:
-    branches:
-      - "articles/**"
 
 jobs:
   call_reusable_workflow:
+    if: startsWith(github.head_ref, 'articles/')
     uses: oka4shi/latex-build/.github/workflows/_build_article_branch.yml@master
     with:
       repo_name: ${{ github.repository }}
